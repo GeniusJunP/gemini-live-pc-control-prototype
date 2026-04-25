@@ -1,0 +1,26 @@
+# Binaries
+audio-control
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Debug files
+debug_audio.raw
+
+# Environment variables
+.env
+
+# Go specific
+*.sum
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
