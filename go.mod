@@ -11,6 +11,7 @@ require (
 
 require (
 	github.com/dblohm7/wingoes v0.0.0-20250822163801-6d8e6105c62d // indirect
+	github.com/disintegration/imaging v1.6.2 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.8.1 // indirect

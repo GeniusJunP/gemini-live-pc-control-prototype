@@ -9,6 +9,10 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var (
+	UI *AudioUI
+)
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Printf("Warning: .env file not found: %v", err)
@@ -33,10 +37,15 @@ func main() {
 	defer conn.Close()
 	fmt.Println(" Gemini Live API に接続しました")
 
+	visualizer := NewAudioVisualizer(50, 10)
+	UI = NewAudioUI()
+	UI.Start()
+	defer UI.Stop()
+
 	if debugMode {
-		log.Println("[Mode] Debug mode: Manual ActivityStart/ActivityEnd")
+		UI.AddLogMessage("[Mode] Debug mode: Manual ActivityStart/ActivityEnd")
 	} else {
-		log.Println("[Mode] Normal mode: Automatic VAD")
+		UI.AddLogMessage("[Mode] Normal mode: Automatic VAD")
 	}
 
 	if err := sendSetupMessage(conn, debugMode); err != nil {
@@ -49,12 +58,7 @@ func main() {
 	}
 	defer processor.Close()
 
-	visualizer := NewAudioVisualizer(50, 10)
-	ui := NewAudioUI()
-	ui.Start()
-	defer ui.Stop()
-
-	outStream, err := startOutputStream(ui)
+	outStream, err := startOutputStream(UI)
 	if err != nil {
 		log.Fatalf("Audio out stream error: %v", err)
 	}
@@ -66,11 +70,11 @@ func main() {
 			processed := processor.Process(d)
 			rmsAfter := visualizer.CalculateRMS(processed)
 
-			ui.UpdateInputBefore(rmsBefore, visualizer.Visualize(d, "Before"))
-			ui.UpdateInputAfter(rmsAfter, visualizer.Visualize(processed, "After"))
+			UI.UpdateInputBefore(rmsBefore, visualizer.Visualize(d, "Before"))
+			UI.UpdateInputAfter(rmsAfter, visualizer.Visualize(processed, "After"))
 
 			if err := sendAudioMessage(conn, processed); err != nil {
-				log.Printf("[Audio Input] WebSocket write error: %v", err)
+				UI.AddLogMessage(fmt.Sprintf("[Audio Input] WebSocket write error: %v", err))
 			}
 		}(data)
 	})
@@ -89,9 +93,9 @@ func main() {
 			case <-ticker.C:
 				windowInfo := getActiveWindow()
 				if err := sendTextMessage(conn, windowInfo); err != nil {
-					log.Printf("[Context] WebSocket write error: %v", err)
+					UI.AddLogMessage(fmt.Sprintf("[Context] WebSocket write error: %v", err))
 				} else {
-					log.Printf("[Context] Sent window info")
+					UI.AddLogMessage("[Context] Sent window info")
 				}
 			}
 		}
@@ -99,5 +103,5 @@ func main() {
 
 	fmt.Println(" マイクに向かって話しかけてください")
 
-	startReceiveLoop(conn, ui)
+	startReceiveLoop(conn, UI)
 }

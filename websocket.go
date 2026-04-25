@@ -2,12 +2,18 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/jpeg"
 	"log"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/disintegration/imaging"
 	"github.com/go-vgo/robotgo"
 	"github.com/gorilla/websocket"
 )
@@ -169,6 +175,121 @@ func handleToolCall(functionCalls []any) []map[string]any {
 				"response": map[string]any{"status": "success"},
 			})
 
+		case "activate_window":
+			var success bool
+			if pid, ok := args["pid"].(float64); ok {
+				log.Printf("[Activate] Window by PID: %d", int(pid))
+				success = activateWindowByPID(int(pid))
+			} else if title, ok := args["title"].(string); ok {
+				log.Printf("[Activate] Window by title: %s", title)
+				success = activateWindowByTitle(title)
+			}
+
+			if success {
+				functionResponses = append(functionResponses, map[string]any{
+					"id":       id,
+					"name":     name,
+					"response": map[string]any{"status": "success"},
+				})
+			} else {
+				functionResponses = append(functionResponses, map[string]any{
+					"id":       id,
+					"name":     name,
+					"response": map[string]any{"status": "error", "error": "Failed to activate window"},
+				})
+			}
+
+		case "list_windows":
+			windows, err := GetAllWindows()
+			if err != nil {
+				log.Printf("[List Windows] Error: %v", err)
+				functionResponses = append(functionResponses, map[string]any{
+					"id":       id,
+					"name":     name,
+					"response": map[string]any{"status": "error", "error": err.Error()},
+				})
+			} else {
+				windowList := make([]map[string]any, len(windows))
+				for i, w := range windows {
+					windowList[i] = map[string]any{
+						"pid":    w.PID,
+						"title":  w.Title,
+						"x":      w.X,
+						"y":      w.Y,
+						"width":  w.Width,
+						"height": w.Height,
+					}
+				}
+				log.Printf("[List Windows] Found %d windows", len(windows))
+				functionResponses = append(functionResponses, map[string]any{
+					"id":       id,
+					"name":     name,
+					"response": map[string]any{"status": "success", "windows": windowList},
+				})
+			}
+
+		case "capture_screen":
+			var img image.Image
+			var err error
+
+			x, hasX := args["x"].(float64)
+			y, hasY := args["y"].(float64)
+			width, hasWidth := args["width"].(float64)
+			height, hasHeight := args["height"].(float64)
+
+			if hasX && hasY && hasWidth && hasHeight {
+				log.Printf("[Capture Screen] Region: (%d, %d) %dx%d", int(x), int(y), int(width), int(height))
+				img, err = robotgo.CaptureImg(int(x), int(y), int(width), int(height))
+			} else {
+				log.Printf("[Capture Screen] Full screen")
+				img, err = robotgo.CaptureImg()
+			}
+
+			if err != nil {
+				log.Printf("[Capture Screen] Error: %v", err)
+				functionResponses = append(functionResponses, map[string]any{
+					"id":       id,
+					"name":     name,
+					"response": map[string]any{"status": "error", "error": err.Error()},
+				})
+			} else {
+				bounds := img.Bounds()
+				maxSize := 768
+				if bounds.Dx() > maxSize || bounds.Dy() > maxSize {
+					log.Printf("[Capture Screen] Resizing from %dx%d to %dx%d", bounds.Dx(), bounds.Dy(), maxSize, maxSize)
+					thumb := imaging.Resize(img, maxSize, maxSize, imaging.Lanczos)
+					img = thumb
+				}
+
+				var buf bytes.Buffer
+				err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 50})
+				if err != nil {
+					log.Printf("[Capture Screen] JPEG encode error: %v", err)
+					functionResponses = append(functionResponses, map[string]any{
+						"id":       id,
+						"name":     name,
+						"response": map[string]any{"status": "error", "error": err.Error()},
+					})
+				} else {
+					imageData := base64.StdEncoding.EncodeToString(buf.Bytes())
+					log.Printf("[Capture Screen] Success, size: %d bytes", len(imageData))
+					if len(imageData) > 10*1024*1024 {
+						log.Printf("[Capture Screen] Warning: Image too large (%d bytes), skipping", len(imageData))
+						functionResponses = append(functionResponses, map[string]any{
+							"id":       id,
+							"name":     name,
+							"response": map[string]any{"status": "error", "error": "image too large"},
+						})
+					} else {
+						functionResponses = append(functionResponses, map[string]any{
+							"id":       id,
+							"name":     name,
+							"response": map[string]any{"status": "success", "image": imageData, "format": "jpeg"},
+						})
+					}
+				}
+			}
+
 		default:
 			log.Printf("[Tool] Unknown tool: %s", name)
 			functionResponses = append(functionResponses, map[string]any{
@@ -206,7 +327,8 @@ func handleServerContent(serverContent map[string]any, ui *AudioUI) {
 		bufferSize := len(audioBuffer)
 		audioBuffer = nil
 		audioMutex.Unlock()
-		ui.UpdateBufferStatus(bufferSize, true)
+		timestamp := time.Now().Format("15:04:05")
+		ui.UpdateBufferStatus(bufferSize, true, timestamp)
 		log.Printf("[Audio Output] Buffer cleared due to interruption (buffer size: %d samples)", bufferSize)
 	}
 
@@ -231,7 +353,8 @@ func startReceiveLoop(conn *websocket.Conn, ui *AudioUI) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Fatalf("[WebSocket] Read error: %v", err)
+			log.Printf("[WebSocket] Read error: %v", err)
+			return
 		}
 
 		var resp map[string]any

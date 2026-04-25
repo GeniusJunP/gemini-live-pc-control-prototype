@@ -14,7 +14,6 @@ type AudioUI struct {
 	outputLevel   *tview.TextView
 	bufferStatus  *tview.TextView
 	transcription *tview.TextView
-	outputLog     *tview.TextView
 	mu            sync.Mutex
 	transcriptBuf string
 }
@@ -23,29 +22,21 @@ func NewAudioUI() *AudioUI {
 	app := tview.NewApplication()
 
 	inputBefore := tview.NewTextView()
-	inputBefore.SetTitle("Audio Input (Before)")
-	inputBefore.SetBorder(true)
 	inputBefore.SetDynamicColors(true)
 
 	inputAfter := tview.NewTextView()
-	inputAfter.SetTitle("Audio Input (After)")
-	inputAfter.SetBorder(true)
 	inputAfter.SetDynamicColors(true)
 
 	outputLevel := tview.NewTextView()
-	outputLevel.SetTitle("Audio Output")
-	outputLevel.SetBorder(true)
 	outputLevel.SetDynamicColors(true)
 
 	bufferStatus := tview.NewTextView()
-	bufferStatus.SetTitle("Buffer Status")
-	bufferStatus.SetBorder(true)
 	bufferStatus.SetDynamicColors(true)
+	bufferStatus.SetScrollable(false)
 
 	transcription := tview.NewTextView()
-	transcription.SetTitle("Transcription")
-	transcription.SetBorder(true)
 	transcription.SetDynamicColors(true)
+	transcription.SetScrollable(true)
 
 	return &AudioUI{
 		app:           app,
@@ -66,14 +57,20 @@ func (ui *AudioUI) Start() {
 }
 
 func (ui *AudioUI) createLayout() *tview.Grid {
-	return tview.NewGrid().
-		SetRows(3, 3, 3, 3, 0).
-		SetColumns(0, 0, 0).
-		AddItem(ui.inputBefore, 0, 0, 1, 3, 0, 0, true).
-		AddItem(ui.inputAfter, 1, 0, 1, 3, 0, 0, false).
-		AddItem(ui.outputLevel, 2, 0, 1, 3, 0, 0, false).
-		AddItem(ui.bufferStatus, 3, 0, 1, 3, 0, 0, false).
-		AddItem(ui.transcription, 4, 0, 1, 3, 0, 0, false)
+	grid := tview.NewGrid().
+		SetRows(1, 1, 1, 1, 1, 1, 1, 0, 1, 0).
+		SetColumns(0).
+		AddItem(tview.NewTextView().SetText("[yellow]Audio Input (Before)[white]"), 0, 0, 1, 1, 0, 0, false).
+		AddItem(ui.inputBefore, 1, 0, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[yellow]Audio Input (After)[white]"), 2, 0, 1, 1, 0, 0, false).
+		AddItem(ui.inputAfter, 3, 0, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[yellow]Audio Output[white]"), 4, 0, 1, 1, 0, 0, false).
+		AddItem(ui.outputLevel, 5, 0, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[yellow]Buffer Status[white]"), 6, 0, 1, 1, 0, 0, false).
+		AddItem(ui.bufferStatus, 7, 0, 1, 1, 0, 0, false).
+		AddItem(tview.NewTextView().SetText("[yellow]Transcription[white]"), 8, 0, 1, 1, 0, 0, false).
+		AddItem(ui.transcription, 9, 0, 1, 1, 0, 0, false)
+	return grid
 }
 
 func (ui *AudioUI) UpdateInputBefore(rms float64, bar string) {
@@ -100,14 +97,14 @@ func (ui *AudioUI) UpdateOutput(rms float64, samples int, bufferRemaining int) {
 	})
 }
 
-func (ui *AudioUI) UpdateBufferStatus(bufferSize int, cleared bool) {
+func (ui *AudioUI) UpdateBufferStatus(bufferSize int, cleared bool, timestamp string) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
 	ui.app.QueueUpdateDraw(func() {
 		if cleared {
-			ui.bufferStatus.SetText(fmt.Sprintf("[red]Buffer cleared (size: %d samples)[white]", bufferSize))
+			ui.bufferStatus.SetText(fmt.Sprintf("[red]Cleared: %d samples @ %s[white]", bufferSize, timestamp))
 		} else {
-			ui.bufferStatus.SetText(fmt.Sprintf("Buffer size: %d samples", bufferSize))
+			ui.bufferStatus.SetText(fmt.Sprintf("Buffer: %d samples", bufferSize))
 		}
 	})
 }
@@ -122,8 +119,17 @@ func (ui *AudioUI) UpdateTranscription(input, output string) {
 		if output != "" {
 			ui.transcriptBuf += fmt.Sprintf("[green]Output:[white] %s\n", output)
 		}
-		ui.transcription.Clear()
-		ui.transcription.SetText("\n" + ui.transcriptBuf)
+		ui.transcription.SetText(ui.transcriptBuf)
+		ui.transcription.ScrollToEnd()
+	})
+}
+
+func (ui *AudioUI) AddLogMessage(message string) {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	ui.app.QueueUpdateDraw(func() {
+		ui.transcriptBuf += fmt.Sprintf("[blue]Log:[white] %s\n", message)
+		ui.transcription.SetText(ui.transcriptBuf)
 		ui.transcription.ScrollToEnd()
 	})
 }
