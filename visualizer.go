@@ -9,18 +9,20 @@ import (
 type AudioVisualizer struct {
 	width  int
 	height int
+	maxRMS float64
 }
 
 func NewAudioVisualizer(width, height int) *AudioVisualizer {
 	return &AudioVisualizer{
 		width:  width,
 		height: height,
+		maxRMS: 32768.0,
 	}
 }
 
 func (av *AudioVisualizer) Visualize(samples []int16, label string) string {
 	if len(samples) == 0 {
-		return fmt.Sprintf("%s: [no data]", label)
+		return fmt.Sprintf("%s: (no data)", label)
 	}
 
 	rms := av.CalculateRMS(samples)
@@ -37,7 +39,10 @@ func (av *AudioVisualizer) CalculateRMS(samples []int16) float64 {
 }
 
 func (av *AudioVisualizer) createBar(rms float64) string {
-	maxRMS := 32768.0
+	maxRMS := av.maxRMS
+	if maxRMS <= 0 {
+		maxRMS = 32768.0
+	}
 	normalized := rms / maxRMS
 	if normalized > 1.0 {
 		normalized = 1.0
@@ -50,7 +55,15 @@ func (av *AudioVisualizer) createBar(rms float64) string {
 
 	bar := strings.Repeat("█", barWidth)
 	spaces := strings.Repeat(" ", av.width-barWidth)
-	return "[" + bar + spaces + "]"
+	// Use parentheses instead of square brackets to avoid tview color-tag parsing.
+	return "(" + bar + spaces + ")"
+}
+
+func (av *AudioVisualizer) SetMaxRMS(max float64) {
+	if max <= 0 {
+		return
+	}
+	av.maxRMS = max
 }
 
 func (av *AudioVisualizer) VisualizeWaveform(samples []int16, label string) string {
@@ -73,7 +86,11 @@ func (av *AudioVisualizer) VisualizeWaveform(samples []int16, label string) stri
 
 	for x := 0; x < width && x*step < len(samples); x++ {
 		sample := samples[x*step]
-		normalized := float64(sample) / 32768.0
+		maxRMS := av.maxRMS
+		if maxRMS <= 0 {
+			maxRMS = 32768.0
+		}
+		normalized := float64(sample) / maxRMS
 		if normalized > 1.0 {
 			normalized = 1.0
 		}

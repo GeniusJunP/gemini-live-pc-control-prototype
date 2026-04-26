@@ -35,11 +35,18 @@ func main() {
 		log.Fatalf("WebSocket connection error: %v", err)
 	}
 	defer conn.Close()
-	fmt.Println(" Gemini Live API に接続しました")
+	// Note: route this message into the TUI log after UI is started.
 
-	visualizer := NewAudioVisualizer(50, 10)
+	// Narrow the visualizer width so small RMS changes are more visible.
+	visualizer := NewAudioVisualizer(10, 5)
+	// Adjust sensitivity to match observed RMS (~3.5k). Tweak as needed.
+	visualizer.SetMaxRMS(2000.0)
 	UI = NewAudioUI()
 	UI.Start()
+
+	// Route standard logger output into the TUI to avoid terminal mixing.
+	log.SetOutput(&uiLogWriter{ui: UI})
+	UI.AddLogMessage("[Info] Gemini Live API に接続しました")
 	defer UI.Stop()
 
 	if debugMode {
@@ -101,7 +108,7 @@ func main() {
 		}
 	}()
 
-	fmt.Println(" マイクに向かって話しかけてください")
+	UI.AddLogMessage("[Info] マイクに向かって話しかけてください")
 
 	startReceiveLoop(conn, UI)
 }

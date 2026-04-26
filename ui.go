@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/rivo/tview"
@@ -58,7 +59,18 @@ func (ui *AudioUI) Start() {
 
 func (ui *AudioUI) createLayout() *tview.Grid {
 	grid := tview.NewGrid().
-		SetRows(1, 1, 1, 1, 1, 1, 1, 0, 1, 0).
+		SetRows(
+			1, // Audio Input (Before) ラベル
+			2, // inputBefore (RMS+バー)
+			1, // Audio Input (After) ラベル
+			2, // inputAfter (RMS+バー)
+			1, // Audio Output ラベル
+			3, // outputLevel (RMS, Samples, Buffer)
+			1, // Buffer Status ラベル
+			1, // bufferStatus（1行）
+			1, // Transcription ラベル
+			0, // transcription（残り全体）
+		).
 		SetColumns(0).
 		AddItem(tview.NewTextView().SetText("[yellow]Audio Input (Before)[white]"), 0, 0, 1, 1, 0, 0, false).
 		AddItem(ui.inputBefore, 1, 0, 1, 1, 0, 0, false).
@@ -114,11 +126,22 @@ func (ui *AudioUI) UpdateTranscription(input, output string) {
 	defer ui.mu.Unlock()
 	ui.app.QueueUpdateDraw(func() {
 		if input != "" {
-			ui.transcriptBuf += fmt.Sprintf("[yellow]Input:[white] %s\n", input)
+			for _, line := range strings.Split(input, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if trimmed != "" {
+					ui.transcriptBuf += fmt.Sprintf("[yellow]Input:[white] %s\n", trimmed)
+				}
+			}
 		}
 		if output != "" {
-			ui.transcriptBuf += fmt.Sprintf("[green]Output:[white] %s\n", output)
+			for _, line := range strings.Split(output, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if trimmed != "" {
+					ui.transcriptBuf += fmt.Sprintf("[green]Output:[white] %s\n", trimmed)
+				}
+			}
 		}
+		ui.truncateTranscript(500)
 		ui.transcription.SetText(ui.transcriptBuf)
 		ui.transcription.ScrollToEnd()
 	})
@@ -128,10 +151,67 @@ func (ui *AudioUI) AddLogMessage(message string) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
 	ui.app.QueueUpdateDraw(func() {
-		ui.transcriptBuf += fmt.Sprintf("[blue]Log:[white] %s\n", message)
+		// 改行で分割し、空白行を除去して1行ずつ追加
+		lines := strings.Split(message, "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" {
+				ui.transcriptBuf += fmt.Sprintf("[blue]Log:[white] %s\n", trimmed)
+			}
+		}
 		ui.transcription.SetText(ui.transcriptBuf)
 		ui.transcription.ScrollToEnd()
 	})
+}
+
+// truncateTranscript keeps the last maxLines lines in transcriptBuf.
+func (ui *AudioUI) truncateTranscript(maxLines int) {
+	lines := strings.Split(ui.transcriptBuf, "\n")
+	// Remove any trailing empty element caused by trailing newline
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) <= maxLines {
+		return
+	}
+	start := len(lines) - maxLines
+	kept := lines[start:]
+	ui.transcriptBuf = strings.Join(kept, "\n") + "\n"
+}
+
+// uiLogWriter implements io.Writer and routes log output into the UI.
+type uiLogWriter struct {
+	ui  *AudioUI
+	buf string
+	mu  sync.Mutex
+}
+
+func (w *uiLogWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	s := w.buf + string(p)
+	parts := strings.Split(s, "\n")
+	// The last element may be a partial line; keep it in buffer.
+	for i := 0; i < len(parts)-1; i++ {
+		trimmed := strings.TrimSpace(parts[i])
+		if trimmed == "" {
+			continue
+		}
+		w.ui.mu.Lock()
+		w.ui.transcriptBuf += fmt.Sprintf("[blue]Log:[white] %s\n", trimmed)
+		w.ui.truncateTranscript(500)
+		w.ui.mu.Unlock()
+
+		w.ui.app.QueueUpdateDraw(func() {
+			w.ui.transcription.SetText(w.ui.transcriptBuf)
+			w.ui.transcription.ScrollToEnd()
+		})
+	}
+
+	// Save partial remainder (no newline yet) for next write.
+	w.buf = parts[len(parts)-1]
+	return len(p), nil
 }
 
 func (ui *AudioUI) Stop() {
